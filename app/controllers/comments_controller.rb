@@ -1,35 +1,54 @@
 class CommentsController < ApplicationController
 
+  before_action :authorize_request
+
   # get all posts comments
   def index
     @post = Post.find_by_id(params[:post_id])
-    render json:{data:{ type: 'comment', attributes:{ data:@post.comments }}},status: 200
+    if @post.nil?
+      return render json: { error: "Post not found" }, status: :not_found
+    end
+    render json: @post.comments,status: 200
   end
 
   # post a comment ot a post
   def create
     # get the post
     @post = Post.find_by_id(params[:post_id])
+    if @post.nil?
+      return render json: { error: "Post not found" }, status: :not_found
+    end
     # create post to comment
-    @post_comment = @post.comments.create(comment_params[:attributes])
+    @comment = @post.comments.create(body: params[:body])
     # associate comment before save(comment cannot be saved without user_id)
-    @post_comment.user_id = @current_user.id
+    @comment.user = @current_user
     # save comment
-    @post_comment.save
-    render json: response_params(@post.comments.last), status: 201
+    if @comment.save
+      render json: @comment, status: :ok
+    else
+      render json: { errors: { status: "400",
+                               title: "Bad request",
+                               details: @comment.errors
+                              }
+      }, status: :bad_request
+    end
   end
 
   # destroy a comment
   def destroy
     @comment = Comment.find_by_id(params[:id])
-    @post_owner_id = (Post.find_by_id(@comment.post_id)).user_id
     if @comment.nil?
-      render json: { data: "null"},status: 404
-    elsif @comment.user_id == @current_user.id || @post_owner_id == @current_user.id
-      @comment.destroy
-      render json: response_params("deleted"), status: 204
+      return render json: { error: "Comment not found"}, status: :not_found
+    end
+    authorize @comment
+    if @comment.destroy
+      render json: { success: true }, status: :ok
     else
-      render json: response_params({error: "can only delete own comment or comment on your own post"}), status: 401
+      render json: { errors: { status: "400",
+                               title: "Bad request",
+                               details: @comment.errors
+                              }
+      }, status: :bad_request
     end
   end
 
@@ -37,9 +56,9 @@ class CommentsController < ApplicationController
   def show
     @comment = Comment.find_by_id(params[:id])
     if @comment.nil?
-      render json: { data: "null" }, status: 404
+      render json: { error: "Comment not found" }, status: :not_found
     else
-      render json: response_params(@comment), status: 200
+      render json: @comment, status: :ok
     end
   end
 
@@ -47,23 +66,11 @@ class CommentsController < ApplicationController
   def update
     @comment = Comment.find_by_id(params[:id])
     if @comment.nil?
-      render json:{ data: "null"}, status: 404
-    elsif @current_user.id == @comment.user_id
-      @updated_comment = @comment.update(comment_params[:attributes])
-      render json:(response_params(@updated_comment)), status: 200
-    else
-      render json:response_params({error: "can only delete own comment or comment on your own post"}), status: 401
+      return render json: { error: "Comment not found" }, status: :not_found
     end
-  end
-
-  private
-
-  def comment_params
-    params.require(:data).permit(:type ,attributes:[:body, :post_id, :user_id])
-  end
-
-  def response_params(comment_attributes)
-    { data: { type: 'comment',attributes: comment_attributes } }
+    authorize @comment
+    @updated_comment = @comment.update(body: params[:body])
+    render json: @updated_comment, status: :ok
   end
 
 end
